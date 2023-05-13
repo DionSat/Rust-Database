@@ -1,3 +1,4 @@
+use nom::branch::alt;
 use nom::{
     bytes::complete::{tag, take_while},
     error::Error,
@@ -5,24 +6,20 @@ use nom::{
 };
 use std::str;
 use std::str::FromStr;
-// use create::{CreateTableStatement};
 
-// #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-// pub struct CreateTableStatement {
-//     pub table: Table,
-//     pub fields: Vec<&str>,
-//     pub keys: Option<Vec<&str>>,
-// }s
-
-// #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-// pub enum SqlQuery {
-//     CreateTable(CreateTableStatement),
-// }
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub struct SqlQuery {
+    pub table_name: String,
+}
 
 pub fn parse_query(input: &str) -> IResult<&str, &str> {
+    Ok(parse_create(input)?)
+}
+
+pub fn parse_create(input: &str) -> IResult<&str, &str> {
     let (input, _) = tag("CREATE TABLE ")(input)?;
     let (input, name) = take_while(|c: char| c.is_alphabetic() || c.is_numeric())(input)?;
-    // let (input, _) = tag("!")(i)?;
+    let (input, _) = tag(";")(input)?;
 
     Ok((input, name))
 }
@@ -47,8 +44,11 @@ impl FromStr for Name {
 
 fn main() {
     // parsed: Ok(Name("hello"))
-    println!("parsed: {:?}", "CREATE TABLE hello".parse::<Name>());
+    println!("parsed: {:?}", "CREATE TABLE hello;".parse::<Name>());
 
-    // parsed: Err(Error { input: "123!", code: Tag })
+    // parsed: parsed: Err(Error { input: "", code: Tag })
     println!("parsed: {:?}", "CREATE TABLE 123".parse::<Name>());
+
+    // parsed: Err(Error { input: "Hello World;", code: Tag })
+    println!("parsed: {:?}", "Hello World;".parse::<Name>());
 }
