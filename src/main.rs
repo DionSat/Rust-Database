@@ -1,7 +1,17 @@
 use nom::branch::alt;
+use nom::bytes::complete::take;
+use nom::bytes::complete::take_until;
+use nom::character::streaming::char;
+use nom::combinator::opt;
+use nom::sequence::terminated;
+use nom::sequence::tuple;
 use nom::{
     bytes::complete::{tag, take_while},
+    character::complete::multispace0,
+    combinator::value,
     error::Error,
+    error::ParseError,
+    sequence::delimited,
     Finish, IResult,
 };
 use std::str;
@@ -18,7 +28,16 @@ pub fn parse_query(input: &str) -> IResult<&str, &str> {
 
 pub fn parse_create(input: &str) -> IResult<&str, &str> {
     let (input, _) = tag("CREATE TABLE ")(input)?;
-    let (input, name) = take_while(|c: char| c.is_alphabetic() || c.is_numeric())(input)?;
+    //let (input, name) = take_while(|c: char| c.is_alphabetic() || c.is_numeric())(input)?;
+    let (input, name) =
+        delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
+    println!("{:?}", (input, name));
+    let (input, inner) = opt(delimited(
+        tag("("),
+        take_while(char::is_alphanumeric),
+        tag(")"),
+    ))(input)?;
+    println!("{:?}", (input, inner));
     let (input, _) = tag(";")(input)?;
 
     Ok((input, name))
@@ -51,4 +70,10 @@ fn main() {
 
     // parsed: Err(Error { input: "Hello World;", code: Tag })
     println!("parsed: {:?}", "Hello World;".parse::<Name>());
+
+    // parsed: Err(Error { input: "Hello World;", code: Tag })
+    println!(
+        "parsed: {:?}",
+        "CREATE TABLE name (column);".parse::<Name>()
+    );
 }
