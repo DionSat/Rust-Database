@@ -7,73 +7,87 @@ use nom::sequence::terminated;
 use nom::sequence::tuple;
 use nom::{
     bytes::complete::{tag, take_while},
+    bytes::streaming::is_not,
     character::complete::multispace0,
     combinator::value,
     error::Error,
     error::ParseError,
-    sequence::delimited,
+    multi::separated_list0,
+    sequence::{delimited, pair},
     Finish, IResult,
 };
 use std::str;
-use std::str::FromStr;
 
-#[derive(Debug, Eq, Hash, PartialEq)]
-pub struct SqlQuery {
-    pub table_name: String,
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub struct SqlCreate<'a> {
+    pub table_name: &'a str,
+    pub columns: Vec<&'a str>,
 }
 
-pub fn parse_query(input: &str) -> IResult<&str, &str> {
-    Ok(parse_create(input)?)
-}
-
-pub fn parse_create(input: &str) -> IResult<&str, &str> {
-    let (input, _) = tag("CREATE TABLE ")(input)?;
-    //let (input, name) = take_while(|c: char| c.is_alphabetic() || c.is_numeric())(input)?;
-    let (input, name) =
-        delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-    println!("{:?}", (input, name));
-    let (input, inner) = opt(delimited(
-        tag("("),
-        take_while(char::is_alphanumeric),
-        tag(")"),
-    ))(input)?;
-    println!("{:?}", (input, inner));
-    let (input, _) = tag(";")(input)?;
-
-    Ok((input, name))
-}
-
-#[derive(Debug)]
-pub struct Name(pub String);
-
-impl FromStr for Name {
-    // the error must be owned as well
-    type Err = Error<String>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match parse_query(s).finish() {
-            Ok((_remaining, name)) => Ok(Name(name.to_string())),
-            Err(Error { input, code }) => Err(Error {
-                input: input.to_string(),
-                code,
-            }),
-        }
+pub fn parse_query(input: &str) -> IResult<&str, SqlCreate> {
+    let create = parse_create(input);
+    match create {
+        Ok((i, o)) => Ok((i, o)),
+        Err(e) => Err(e),
     }
 }
 
+pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
+    let (input, _) = tag("CREATE TABLE ")(input)?;
+    let (input, table_name) =
+        delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
+    println!("{:?}", (input, table_name));
+    let (input, columns) = delimited(
+        tag("("),
+        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        tag(")"),
+    )(input)?;
+    println!("{:?}", (input, columns.clone()));
+    let (input, _) = tag(";")(input)?;
+
+    Ok((
+        input,
+        SqlCreate {
+            table_name,
+            columns,
+        },
+    ))
+}
+
+// #[derive(Debug)]
+// pub struct Name(pub String);
+
+// impl FromStr for Name {
+//     // the error must be owned as well
+//     type Err = Error<String>;
+
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         match parse_query(s).finish() {
+//             Ok((_remaining, name)) => Ok(Name(name.to_string())),
+//             Err(Error { input, code }) => Err(Error {
+//                 input: input.to_string(),
+//                 code,
+//             }),
+//         }
+//     }
+// }
+
 fn main() {
     // parsed: Ok(Name("hello"))
-    println!("parsed: {:?}", "CREATE TABLE hello;".parse::<Name>());
+    // println!("parsed: {:?}", parse_query("CREATE TABLE hello;"));
 
     // parsed: parsed: Err(Error { input: "", code: Tag })
-    println!("parsed: {:?}", "CREATE TABLE 123".parse::<Name>());
+    // println!("parsed: {:?}", "CREATE TABLE 123".parse::<Name>());
 
     // parsed: Err(Error { input: "Hello World;", code: Tag })
-    println!("parsed: {:?}", "Hello World;".parse::<Name>());
+    // println!("parsed: {:?}", "Hello World;".parse::<Name>());
+
+    // parsed: Err(Error { input: "Hello World;", code: Tag })
+    println!("parsed: {:?}", parse_create("CREATE TABLE name (column);"));
 
     // parsed: Err(Error { input: "Hello World;", code: Tag })
     println!(
         "parsed: {:?}",
-        "CREATE TABLE name (column);".parse::<Name>()
+        parse_create("CREATE TABLE name (column, column2);")
     );
 }
