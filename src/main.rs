@@ -82,12 +82,12 @@ fn main() {
     // parsed: Err(Error { input: "Hello World;", code: Tag })
     // println!("parsed: {:?}", "Hello World;".parse::<Name>());
 
-    // parsed: Err(Error { input: "Hello World;", code: Tag })
-    println!("parsed: {:?}", parse_create("CREATE TABLE name (column);"));
+    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column"] }))
+    println!("parsed: {:?}", parse_query("CREATE TABLE name (column);"));
 
-    // parsed: Err(Error { input: "Hello World;", code: Tag })
+    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column", "column2"] }))
     println!(
         "parsed: {:?}",
-        parse_create("CREATE TABLE name (column, column2);")
+        parse_query("CREATE TABLE name (column, column2);")
     );
 }
