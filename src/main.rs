@@ -1,22 +1,15 @@
-use nom::branch::alt;
-use nom::bytes::complete::take;
-use nom::bytes::complete::take_until;
-use nom::character::streaming::char;
-use nom::sequence::terminated;
-use nom::sequence::tuple;
+use crate::SqlQuery::{CreateTable, Drop};
 use nom::{
+    branch::alt,
     bytes::complete::{tag, take_while},
-    bytes::streaming::is_not,
     character::complete::multispace0,
-    combinator::value,
-    combinator::{map, opt},
-    error::Error,
-    error::ParseError,
+    combinator::map,
     multi::separated_list0,
-    sequence::{delimited, pair},
-    Finish, IResult,
+    sequence::delimited,
+    IResult,
+    Err::{Error, Failure, Incomplete},
 };
-use std::fs::File;
+use std::fs::{remove_file, File};
 use std::io::Write;
 use std::str;
 
@@ -27,21 +20,31 @@ pub struct SqlCreate<'a> {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SqlDrop<'a> {
+    pub table_name: &'a str,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SqlQuery<'a> {
     CreateTable(SqlCreate<'a>),
+    Drop(SqlDrop<'a>),
 }
 
 pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
+    // Consume the CREATE TABLE statement
     let (input, _) = tag("CREATE TABLE ")(input)?;
+    // Consume the whitespaces surrounding the table name
     let (input, table_name) =
         delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
     println!("{:?}", (input, table_name));
+    // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
         separated_list0(tag(", "), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
     println!("{:?}", (input, columns.clone()));
+    // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
     Ok((
@@ -53,71 +56,61 @@ pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
     ))
 }
 
-// impl Default for SqlCreate<'_> {
-//     fn default(input: &str) -> IResult<&str, SqlCreate> {
-//         let (input, _) = tag("CREATE TABLE ")(input)?;
-//         let (input, table_name) =
-//             delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-//         println!("{:?}", (input, table_name));
-//         let (input, columns) = delimited(
-//             tag("("),
-//             separated_list0(tag(", "), take_while(char::is_alphanumeric)),
-//             tag(")"),
-//         )(input)?;
-//         println!("{:?}", (input, columns.clone()));
-//         let (input, _) = tag(";")(input)?;
+pub fn parse_drop(input: &str) -> IResult<&str, SqlDrop> {
+    // Consume the DROP TABLE statement
+    let (input, _) = tag("DROP TABLE ")(input)?;
+    // Consume the whitespace if exist
+    let (input, _) = multispace0(input)?;
+    // Consume the table name
+    let (input, table_name) = take_while(char::is_alphanumeric)(input)?;
+    println!("{:?}", (input, table_name));
+    // Consume the semi colon ending
+    let (input, _) = tag(";")(input)?;
 
-//         Ok((
-//             input,
-//             SqlCreate {
-//                 table_name,
-//                 columns,
-//             },
-//         ))
-//     }
-// }
-
-pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
-    // let create = parse_create(input);
-    // match create {
-    //     Ok((i, o)) => Ok((i, o)),
-    //     Err(e) => Err(e),
-    // }
-    alt((map(parse_create, |c| SqlQuery::CreateTable(c)),))(input)
+    Ok((input, SqlDrop { table_name }))
 }
 
-// #[derive(Debug)]
-// pub struct Name(pub String);
+pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
+    // Parse input string and return successful parse result
+    // input: string reference
+    // return: Result with remaining input and SqlQuery
+    alt((
+        map(parse_create, |c| SqlQuery::CreateTable(c)),
+        map(parse_drop, |d| SqlQuery::Drop(d)),
+    ))(input)
+}  
 
-// impl FromStr for Name {
-//     // the error must be owned as well
-//     type Err = Error<String>;
-
-//     fn from_str(s: &str) -> Result<Self, Self::Err> {
-//         match parse_query(s).finish() {
-//             Ok((_remaining, name)) => Ok(Name(name.to_string())),
-//             Err(Error { input, code }) => Err(Error {
-//                 input: input.to_string(),
-//                 code,
-//             }),
-//         }
-//     }
-// }
-
-pub fn createTable(query: SqlCreate<'_>) {
+pub fn create_table(query: SqlCreate<'_>) {
     let path = format!("data/{}.csv", query.table_name);
     // Create a file
-    let mut data_file = File::create(path).expect("creation failed");
+    let mut data_file = File::create(path).expect("Table creation failed. Couldn't find Path");
 
     // Write contents to the file
-    for column in query.columns {
-        data_file.write(column.as_bytes()).expect("write failed");
-    }
+    data_file
+        .write(query.columns.join(",").as_bytes())
+        .expect("Table creation faild. Failed to write");
 
-    println!("Created a file data.txt");
+    println!("Created table {}", query.table_name);
+}
+
+pub fn drop_table(query: SqlDrop<'_>) {
+    let path = format!("data/{}.csv", query.table_name);
+    // Delete file
+    remove_file(path).expect("Table could not be dropped");
+    println!("Table {} is dropped", query.table_name);
 }
 
 fn main() {
+    let (_, query) = parse_query("DROP TABLE name;").unwrap();
+    println!("{:?}", query);
+    match query {
+        CreateTable(c) => create_table(c),
+        Drop(d) => drop_table(d),
+    }
+}
+
+#[test]
+fn query_test() {
     // parsed: Ok(Name("hello"))
     // println!("parsed: {:?}", parse_query("CREATE TABLE hello;"));
 
@@ -128,18 +121,32 @@ fn main() {
     // println!("parsed: {:?}", "Hello World;".parse::<Name>());
 
     // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column"] }))
-    println!("parsed: {:?}", parse_query("CREATE TABLE name (column);"));
-
-    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column", "column2"] }))
-    println!(
-        "parsed: {:?}",
-        parse_query("CREATE TABLE name (column, column2);")
+    assert_eq!(
+        parse_query("CREATE TABLE name (column);"),
+        Ok((
+            "",
+            CreateTable(SqlCreate {
+                table_name: "name",
+                columns: ["column"].to_vec()
+            })
+        ))
     );
 
-    let (_, query) = parse_query("CREATE TABLE name (column, column2);").unwrap();
-    // fs::write("/tmp/foo", data).expect("Unable to write file");
-    // println!("{:?}", query)
-    match query {
-        SqlQuery::CreateTable(c) => createTable(c),
-    }
+    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column", "column2"] }))
+    assert_eq!(
+        parse_query("CREATE TABLE name (column, column2);"),
+        Ok((
+            "",
+            CreateTable(SqlCreate {
+                table_name: "name",
+                columns: ["column", "column2"].to_vec()
+            })
+        ))
+    );
+
+    // parsed: Ok(("", Drop(SqlDrop { table_name: "name" })))
+    assert_eq!(
+        parse_query("DROP TABLE name;"),
+        Ok(("", Drop(SqlDrop { table_name: "name" })))
+    );
 }
