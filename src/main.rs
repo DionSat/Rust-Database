@@ -7,7 +7,6 @@ use nom::{
     multi::separated_list0,
     sequence::delimited,
     IResult,
-    Err::{Error, Failure, Incomplete},
 };
 use std::fs::{remove_file, File};
 use std::io::Write;
@@ -75,10 +74,10 @@ pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
     // input: string reference
     // return: Result with remaining input and SqlQuery
     alt((
-        map(parse_create, |c| SqlQuery::CreateTable(c)),
-        map(parse_drop, |d| SqlQuery::Drop(d)),
+        map(parse_create, SqlQuery::CreateTable),
+        map(parse_drop, SqlQuery::Drop),
     ))(input)
-}  
+}
 
 pub fn create_table(query: SqlCreate<'_>) {
     let path = format!("data/{}.csv", query.table_name);
@@ -87,7 +86,7 @@ pub fn create_table(query: SqlCreate<'_>) {
 
     // Write contents to the file
     data_file
-        .write(query.columns.join(",").as_bytes())
+        .write_all(query.columns.join(",").as_bytes())
         .expect("Table creation faild. Failed to write");
 
     println!("Created table {}", query.table_name);
