@@ -1,4 +1,4 @@
-use crate::SqlQuery::{CreateTable, Drop};
+use crate::SqlQuery::{CreateTable, Drop, Insert};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
@@ -8,8 +8,11 @@ use nom::{
     sequence::delimited,
     IResult,
 };
-use std::fs::{remove_file, File};
+use std::fs::{remove_file, File, OpenOptions};
+use std::fmt::Write as fmt_write;
 use std::io::Write;
+use std::io::{self, BufRead};
+use std::path::Path;
 use std::str;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -24,9 +27,17 @@ pub struct SqlDrop<'a> {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SqlInsert<'a> {
+    pub table_name: &'a str,
+    pub columns: Vec<&'a str>,
+    pub values: Vec<&'a str>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SqlQuery<'a> {
     CreateTable(SqlCreate<'a>),
     Drop(SqlDrop<'a>),
+    Insert(SqlInsert<'a>),
 }
 
 pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
@@ -69,6 +80,46 @@ pub fn parse_drop(input: &str) -> IResult<&str, SqlDrop> {
     Ok((input, SqlDrop { table_name }))
 }
 
+pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
+    // Consume the INSERT INTO statement
+    let (input, _) = tag("INSERT INTO ")(input)?;
+    // Consume the table name surrounded by whitespace
+    let (input, table_name) =
+        delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
+    println!("{:?}", (input, table_name));
+    // Consume the columns in between parenthesis
+    let (input, columns) = delimited(
+        tag("("),
+        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        tag(")"),
+    )(input)?;
+    println!("{:?}", (input, columns.clone()));
+    // Consume the whitespace if exist
+    let (input, _) = multispace0(input)?;
+    // Consume the VALUES statement
+    let (input, _) = tag("VALUES")(input)?;
+    // Consume the whitespace if exist
+    let (input, _) = multispace0(input)?;
+    // Consume the values in between the parenthesis
+    let (input, values) = delimited(
+        tag("("),
+        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        tag(")"),
+    )(input)?;
+    println!("{:?}", (input, values.clone()));
+    // Consume the semi colon ending
+    let (input, _) = tag(";")(input)?;
+
+    Ok((
+        input,
+        SqlInsert {
+            table_name,
+            columns,
+            values,
+        },
+    ))
+}
+
 pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
     // Parse input string and return successful parse result
     // input: string reference
@@ -76,6 +127,7 @@ pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
     alt((
         map(parse_create, SqlQuery::CreateTable),
         map(parse_drop, SqlQuery::Drop),
+        map(parse_insert, SqlQuery::Insert),
     ))(input)
 }
 
@@ -99,27 +151,50 @@ pub fn drop_table(query: SqlDrop<'_>) {
     println!("Table {} is dropped", query.table_name);
 }
 
+pub fn insert_into(query: SqlInsert<'_>) {
+    let path = format!("data/{}.csv", query.table_name);
+    if Path::new(&path).exists() {
+        let read_file = File::open(path).expect("Table could not be brought up");
+        let path = format!("data/{}.csv", query.table_name);
+        let mut write_file = OpenOptions::new()
+        .append(true)
+        .open(path)
+        .expect("Table could not be brought up");
+        let mut file_iter = io::BufReader::new(read_file).lines();
+        let file_columns = file_iter.nth(0).unwrap();
+        let mut str_columns: String = "".to_string();
+        match file_columns {
+            Ok(s) => str_columns = s,
+            Err(e) => eprintln!("{}", e),
+        }
+        let parts = str_columns.split(",");
+        let vec_columns = parts.collect::<Vec<&str>>();
+        println!("{:?}", vec_columns);
+        println!("{:?}", query.columns);
+        if vec_columns == query.columns {
+            write_file.write_all("\n".as_bytes()).expect("Could not insert into table");
+            write_file
+            .write_all(query.values.join(",").as_bytes())
+            .expect("Could not insert into table");
+        }
+        else {
+            eprintln!("Error: Columns do not match table columns. Column names either not in order or not all columns are listed or are invalid")
+        }
+    }
+}
+
 fn main() {
-    let (_, query) = parse_query("DROP TABLE name;").unwrap();
+    let (_, query) = parse_query("INSERT INTO name (column, column2) VALUES (0, 1);").unwrap();
     println!("{:?}", query);
     match query {
         CreateTable(c) => create_table(c),
         Drop(d) => drop_table(d),
+        Insert(i) => insert_into(i),
     }
 }
 
 #[test]
-fn query_test() {
-    // parsed: Ok(Name("hello"))
-    // println!("parsed: {:?}", parse_query("CREATE TABLE hello;"));
-
-    // parsed: parsed: Err(Error { input: "", code: Tag })
-    // println!("parsed: {:?}", "CREATE TABLE 123".parse::<Name>());
-
-    // parsed: Err(Error { input: "Hello World;", code: Tag })
-    // println!("parsed: {:?}", "Hello World;".parse::<Name>());
-
-    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column"] }))
+fn parses_test() {
     assert_eq!(
         parse_query("CREATE TABLE name (column);"),
         Ok((
@@ -147,5 +222,18 @@ fn query_test() {
     assert_eq!(
         parse_query("DROP TABLE name;"),
         Ok(("", Drop(SqlDrop { table_name: "name" })))
+    );
+
+    // parsed: Ok(("", SqlCreate { table_name: "name", columns: ["column", "column2"] }))
+    assert_eq!(
+        parse_query("INSERT INTO name (column, column2) VALUES (0, 1);"),
+        Ok((
+            "",
+            Insert(SqlInsert {
+                table_name: "name",
+                columns: ["column", "column2"].to_vec(),
+                values: ["0", "1"].to_vec(),
+            })
+        ))
     );
 }
