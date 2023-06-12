@@ -7,10 +7,12 @@ use nom::{
     multi::separated_list0,
     sequence::delimited,
     bytes::streaming::{is_not, take_until},
+    character::streaming::space0,
     IResult,
 };
 use std::fs::{remove_file, File, OpenOptions};
 use std::io::Write;
+use nom::Parser;
 use std::io::{self, BufRead};
 use std::path::Path;
 use std::str;
@@ -78,7 +80,7 @@ pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
     // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
-        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
     println!("{:?}", (input, columns.clone()));
@@ -124,7 +126,7 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
     // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
-        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
     println!("{:?}", (input, columns.clone()));
@@ -137,7 +139,7 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
     // Consume the values in between the parenthesis
     let (input, values) = delimited(
         tag("("),
-        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
     println!("{:?}", (input, values.clone()));
@@ -168,10 +170,10 @@ pub fn parse_select(input: &str) -> IResult<&str, SqlSelect> {
     let (input, columns) = opt(alt((
         delimited(
             tag("("),
-            separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+            separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
             tag(")"),
         ),
-        separated_list0(tag(", "), take_while(char::is_alphanumeric)),
+        separated_list0(tag(",").and(space0) , take_while(char::is_alphanumeric)),
     )))(input)?;
     println!("{:?}", (input, columns.clone()));
     // Consume the whitespace if exist
@@ -209,7 +211,8 @@ pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
     ))(input)
 }
 
-
+// Function to create a table as a csv
+// query: the SqlCreate struct holding the necessary information
 pub fn create_table(query: SqlCreate<'_>) {
     let path = format!("data/{}.csv", query.table_name);
     // Create a file
@@ -223,6 +226,8 @@ pub fn create_table(query: SqlCreate<'_>) {
     println!("Created table {}", query.table_name);
 }
 
+// Function to drop a table and delete the csv
+// query: the SqlDrop struct holding the necessary information
 pub fn drop_table(query: SqlDrop<'_>) {
     let path = format!("data/{}.csv", query.table_name);
     // Delete file
@@ -230,6 +235,8 @@ pub fn drop_table(query: SqlDrop<'_>) {
     println!("Table {} is dropped", query.table_name);
 }
 
+// Function to insert into a table and the csv
+// query: the SqlInsert struct holding the necessary information
 pub fn insert_into(query: SqlInsert<'_>) {
     // Create the datapath string
     let path = format!("data/{}.csv", query.table_name);
@@ -361,7 +368,7 @@ fn parses_test() {
 
     // parsed: Ok(("", Selection(SqlSelect { columns: Some([""]), table_name: "name", all_columns: Some("*") })))
     assert_eq!(
-        parse_query("SELECT column, column2 FROM name;"),
+        parse_query("SELECT column,        column2 FROM name;"),
         Ok((
             "",
             Selection(SqlSelect {
