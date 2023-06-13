@@ -1,18 +1,17 @@
 use crate::SqlQuery::{CreateTable, Drop, Insert, Selection};
+use nom::Parser;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::multispace0,
-    combinator::{map, opt, map_parser},
+    character::streaming::space0,
+    combinator::{map, opt},
     multi::separated_list0,
     sequence::delimited,
-    bytes::streaming::{is_not, take_until},
-    character::streaming::space0,
     IResult,
 };
 use std::fs::{remove_file, File, OpenOptions};
 use std::io::Write;
-use nom::Parser;
 use std::io::{self, BufRead};
 use std::path::Path;
 use std::str;
@@ -76,14 +75,12 @@ pub fn parse_create(input: &str) -> IResult<&str, SqlCreate> {
     // Consume the whitespaces surrounding the table name
     let (input, table_name) =
         delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-    println!("{:?}", (input, table_name));
     // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
         separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
-    println!("{:?}", (input, columns.clone()));
     // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
@@ -106,7 +103,6 @@ pub fn parse_drop(input: &str) -> IResult<&str, SqlDrop> {
     let (input, _) = multispace0(input)?;
     // Consume the table name
     let (input, table_name) = take_while(char::is_alphanumeric)(input)?;
-    println!("{:?}", (input, table_name));
     // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
@@ -122,14 +118,12 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
     // Consume the table name surrounded by whitespace
     let (input, table_name) =
         delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-    println!("{:?}", (input, table_name));
     // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
         separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
-    println!("{:?}", (input, columns.clone()));
     // Consume the whitespace if exist
     let (input, _) = multispace0(input)?;
     // Consume the VALUES statement
@@ -142,7 +136,6 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
         separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
-    println!("{:?}", (input, values.clone()));
     // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
@@ -166,16 +159,14 @@ pub fn parse_select(input: &str) -> IResult<&str, SqlSelect> {
     let (input, _) = multispace0(input)?;
     // Consume column names if exist
     let (input, all_columns) = opt(tag("*"))(input)?;
-    println!("{:?}", (input, all_columns));
     let (input, columns) = opt(alt((
         delimited(
             tag("("),
             separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
             tag(")"),
         ),
-        separated_list0(tag(",").and(space0) , take_while(char::is_alphanumeric)),
+        separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
     )))(input)?;
-    println!("{:?}", (input, columns.clone()));
     // Consume the whitespace if exist
     let (input, _) = multispace0(input)?;
     // Consume the FROM statement
@@ -185,7 +176,6 @@ pub fn parse_select(input: &str) -> IResult<&str, SqlSelect> {
     // Consume the table name
     let (input, table_name) =
         delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-    println!("{:?}", (input, columns.clone()));
     // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
@@ -214,16 +204,20 @@ pub fn parse_query(input: &str) -> IResult<&str, SqlQuery> {
 // Function to create a table as a csv
 // query: the SqlCreate struct holding the necessary information
 pub fn create_table(query: SqlCreate<'_>) {
-    let path = format!("data/{}.csv", query.table_name);
-    // Create a file
-    let mut data_file = File::create(path).expect("Table creation failed. Couldn't find Path");
+    if query.columns.is_empty() || query.columns.contains(&"") {
+        println!("Error empty or no column name provided");
+    } else {
+        let path = format!("data/{}.csv", query.table_name);
+        // Create a file
+        let mut data_file = File::create(path).expect("Table creation failed. Couldn't find Path");
 
-    // Write contents to the file
-    data_file
-        .write_all(query.columns.join(",").as_bytes())
-        .expect("Table creation faild. Failed to write");
+        // Write contents to the file
+        data_file
+            .write_all(query.columns.join(",").as_bytes())
+            .expect("Table creation faild. Failed to write");
 
-    println!("Created table {}", query.table_name);
+        println!("Created table {}", query.table_name);
+    }
 }
 
 // Function to drop a table and delete the csv
@@ -254,14 +248,16 @@ pub fn insert_into(query: SqlInsert<'_>) {
         let mut file_iter = io::BufReader::new(read_file).lines();
         let file_columns = file_iter.next().unwrap();
         let mut str_columns: String = "".to_string();
+        // Store the columns in a String
         match file_columns {
             Ok(s) => str_columns = s,
             Err(e) => eprintln!("{}", e),
         }
+        // Split the String by the commas
         let parts = str_columns.split(',');
+        // Then turn the result into a vector of columns
         let vec_columns = parts.collect::<Vec<&str>>();
-        println!("{:?}", vec_columns);
-        println!("{:?}", query.columns);
+        // Check if the columns provided in the query match the columns in the Table
         if vec_columns == query.columns {
             write_file
                 .write_all("\n".as_bytes())
@@ -275,18 +271,82 @@ pub fn insert_into(query: SqlInsert<'_>) {
     }
 }
 
-pub fn select_table(_query: SqlSelect<'_>) {
-    todo!();
+// Function to select rows from a table
+// query: the SqlSelect struct holding the necessary information
+pub fn select_table(query: SqlSelect<'_>) {
+    // Create the datapath string
+    let path = format!("data/{}.csv", query.table_name);
+    // Open the table csv for reading
+    let file = File::open(path).expect("Table could not be brought up");
+    // Read the CSV including the headers
+    let mut rdr = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(file);
+    // Get the headers
+    let headers = rdr.headers().cloned().unwrap();
+    if query.all_columns.is_some() {
+        for result in rdr.records() {
+            let record = result.expect("Could not read row");
+            for i in 0..record.len() {
+                print!(" {} |", record.get(i).unwrap());
+            }
+            println!();
+        }
+    } else {
+        // Vector for column indexes we can parse
+        let mut col_index = Vec::new();
+        // Index variable
+        let mut i = 0;
+        loop {
+            if headers.get(i).is_some() {
+                match query.columns {
+                    Some(ref v) => {
+                        for qcol in v {
+                            if headers.get(i) == Some(qcol) {
+                                col_index.push(i);
+                            }
+                        }
+                    }
+                    None => println!("Table has no column names"),
+                }
+            }
+            // We are assuming that there should not be empty column names unless its not a name
+            if headers.get(i).is_none() {
+                break;
+            }
+            i += 1;
+        }
+        for result in rdr.records() {
+            let record = result.expect("Could not read row");
+            for j in col_index.clone() {
+                print!(" {} |", record.get(j).unwrap());
+            }
+            println!();
+        }
+    }
 }
 
 fn main() {
-    let (_, query) = parse_query("INSERT INTO name (column, column2) VALUES (0, 1);").unwrap();
-    println!("{:?}", query);
-    match query {
-        CreateTable(c) => create_table(c),
-        Drop(d) => drop_table(d),
-        Insert(i) => insert_into(i),
-        Selection(s) => select_table(s),
+    let mut input = String::new();
+    while input.trim() != "quit" {
+        // Reset Input
+        input.clear();
+        print!("psql> ");
+        io::stdout().flush().expect("Cannot flush stdout");
+        match io::stdin().read_line(&mut input) {
+            Ok(_) => match parse_query(input.trim()) {
+                Ok(v) => match v.1 {
+                    CreateTable(c) => create_table(c),
+                    Drop(d) => drop_table(d),
+                    Insert(i) => insert_into(i),
+                    Selection(s) => select_table(s),
+                },
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            },
+            Err(e) => println!("Error: {:?}", e),
+        }
     }
 }
 
@@ -314,12 +374,6 @@ fn parses_test() {
             })
         ))
     );
-
-    // Create file for testing
-    // create_table(SqlCreate {
-    //             table_name: "name",
-    //             columns: ["column", "column2"].to_vec()
-    //         });
 
     // parsed: Ok(("", Drop(SqlDrop { table_name: "name" })))
     assert_eq!(
@@ -373,10 +427,9 @@ fn parses_test() {
             "",
             Selection(SqlSelect {
                 table_name: "name",
-                columns: Some(["column","column2"].to_vec()),
+                columns: Some(["column", "column2"].to_vec()),
                 all_columns: None,
             })
         ))
     );
-
 }
