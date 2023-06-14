@@ -1,7 +1,8 @@
 use crate::SqlQuery::{CreateTable, Drop, Insert, Selection};
+use nom::Parser;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_until, take_while},
+    bytes::complete::{tag, take_while},
     character::complete::multispace0,
     character::streaming::space0,
     combinator::{map, opt},
@@ -9,7 +10,6 @@ use nom::{
     sequence::delimited,
     IResult,
 };
-use nom::{AsChar, Parser};
 use std::fs::{remove_file, File, OpenOptions};
 use std::io::Write;
 use std::io::{self, BufRead};
@@ -118,14 +118,12 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
     // Consume the table name surrounded by whitespace
     let (input, table_name) =
         delimited(multispace0, take_while(char::is_alphanumeric), multispace0)(input)?;
-    println!("{:?}", table_name);
     // Consume the columns in between parenthesis
     let (input, columns) = delimited(
         tag("("),
         separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
-    println!("{:?}", columns);
     // Consume the whitespace if exist
     let (input, _) = space0(input)?;
     // Consume the VALUES statement
@@ -138,7 +136,6 @@ pub fn parse_insert(input: &str) -> IResult<&str, SqlInsert> {
         separated_list0(tag(",").and(space0), take_while(char::is_alphanumeric)),
         tag(")"),
     )(input)?;
-    println!("{:?}", values);
     // Consume the semi colon ending
     let (input, _) = tag(";")(input)?;
 
@@ -263,8 +260,6 @@ pub fn insert_into(query: SqlInsert<'_>) {
         // Then turn the result into a vector of columns
         let vec_columns = parts.collect::<Vec<&str>>();
         // Check if the columns provided in the query match the columns in the Table
-        println!("{:?}", vec_columns);
-        println!("{:?}", query.columns);
         if vec_columns == query.columns {
             write_file
                 .write_all("\n".as_bytes())
@@ -272,6 +267,7 @@ pub fn insert_into(query: SqlInsert<'_>) {
             write_file
                 .write_all(query.values.join(",").as_bytes())
                 .expect("Could not insert into table");
+            println!("Successfully Inserted into {} table", query.table_name);
         } else {
             eprintln!("Error: Columns do not match table columns. Column names either not in order or not all columns are listed or are invalid")
         }
